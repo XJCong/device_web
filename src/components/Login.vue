@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import {login, setAuthToken} from '@/api.js';
+import {ElMessage} from "element-plus";
 
 const router = useRouter();
 
@@ -24,9 +25,9 @@ const handleSubmit = async () => {
       localStorage.setItem('user_role', user_role);
       setAuthToken(token);
       // 跳转到首页
-      alert("登录成功")
       console.log(message);
       await router.push('/Sidebar/home');
+      ElMessage.success("登录成功")
       } else {
         alert('登录失败，请检查用户名或密码');
       }

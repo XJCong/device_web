@@ -30,16 +30,25 @@ import { RouterView } from 'vue-router'
   display: flex;
   justify-content: space-between;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  height: 60px; /* 固定高度 */
+  position: fixed; /* 关键：固定定位 */
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000; /* 确保在其他元素之上 */
+  align-items: center;
 }
 
 .logo {
   font-size: 1.5rem;
   font-weight: bold;
+  line-height: 60px;
 }
 
 .nav-links {
   display: flex;
   gap: 1rem;
+  align-items: center;
 }
 
 .nav-links a {
@@ -54,13 +63,10 @@ import { RouterView } from 'vue-router'
 
 .content {
   flex: 1;
-  padding: 2rem;
   background-color: #f9f9f9;
   width: auto;
   box-sizing: border-box;
-  /* 移除以下行，避免影响子元素 */
-  /* display: flex; */
-  /* justify-content: center; */
-  /* align-items: center; */
+  margin-top: 60px; /* 与 .top-bar 高度一致 */
 }
 </style>
+

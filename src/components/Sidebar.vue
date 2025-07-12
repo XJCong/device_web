@@ -17,16 +17,19 @@
 
 <style scoped>
 .container {
-  display: grid; /* 使用网格布局 */
-  grid-template-columns: 1fr 8fr; /* 设置两列，比例为 1:2 */
-  gap: 10px; /* 列之间的间距 */
-  height: 100vh; /* 设置容器高度为视口高度 */
-  width: 100vw;
+  display: flex;
+  min-height: 90vh;
+  max-height: 100vh;
 }
 
 .sidebar {
   background-color: #f4f4f4;
+  width: 220px;
   padding: 20px;
+  position: fixed;
+  top: 60px; /* 从 .top-bar 底部开始 */
+  left: 0;
+  height: calc(100vh - 60px); /* 减去 .top-bar 的高度 */
   overflow-y: auto;
 }
 
@@ -58,8 +61,11 @@
 }
 
 .content {
-  padding: 20px;
-  background-color: #fff; /* 可选：设置背景颜色 */
-  overflow-x: auto; /* 可选：启用垂直滚动条 */
+  margin-left: 240px;
+  padding: 10px;
+  background-color: #ffffff;
+  max-height: 100vh;
+  overflow-y: auto;
+  margin-top: 0; /* 与 .top-bar 高度一致 */
 }
 </style>
