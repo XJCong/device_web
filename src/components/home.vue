@@ -1,6 +1,6 @@
 <script setup>
-import { ref, computed, nextTick } from 'vue'
-import { getDevices } from '@/api'
+import { ref, computed, nextTick,onMounted } from 'vue'
+import { getDevices,changeInfo } from '@/api'
 
 /* -------- 原始数据 -------- */
 const devices       = ref([])
@@ -81,11 +81,7 @@ const editing = ref({})
 
 const updateValue = (index, key, val) => {
   devices.value[index][key] = val
-  if (JSON.stringify(devices.value[index]) !== JSON.stringify(originalRows.value[index])) {
-    dirtyFlags.value[index] = true
-  } else {
-    dirtyFlags.value[index] = false
-  }
+  dirtyFlags.value[index] = JSON.stringify(devices.value[index]) !== JSON.stringify(originalRows.value[index]);
 }
 
 const saveEdit = (index, key) => {
@@ -108,28 +104,42 @@ const collectChanges = () => {
   const list = []
   devices.value.forEach((row, idx) => {
     if (!dirtyFlags.value[idx]) return
+
     const original = originalRows.value[idx]
     const changed  = {}
+
     Object.keys(row).forEach(k => {
       if (row[k] !== original[k]) {
         changed[k] = { old: original[k], new: row[k] }
       }
     })
-    list.push({ rowIndex: idx + 1, changes: changed })
+
+    // 使用 zcbh 替换 rowIndex
+    list.push({
+      rowIndex: idx+1,
+      zcbh: row.zcbh,// 设备编号作为唯一标识
+      changes: changed
+    })
   })
   return list
 }
+
 
 /* -------- 提交 & 放弃 -------- */
 const handleSubmit = () => {
   showSubmitModal.value = true
 }
-const confirmSubmit = () => {
-  // TODO: 调接口真正提交
-  console.log('提交数据：', collectChanges())
-  // 成功后重新拉取
-  fetchDevices()
-  showSubmitModal.value = false
+const confirmSubmit = async () => {
+  try {
+    console.log(collectChanges())
+    await changeInfo(collectChanges())
+    alert('修改成功')
+    await fetchDevices()
+  } catch (e) {
+    alert('修改失败：' + (e.response?.data || e.message))
+  } finally {
+    showSubmitModal.value = false
+  }
 }
 
 const handleDiscard = () => {
@@ -145,6 +155,10 @@ const confirmDiscard = () => {
   })
   showDiscardModal.value = false
 }
+// 初始化时拉取数据
+onMounted(() => {
+  fetchDevices()
+})
 </script>
 
 <template>

@@ -1,6 +1,9 @@
 // src/api.js
 import axios from 'axios';
 
+
+
+
 const apiClient = axios.create({
   baseURL: ' http://localhost:8080', // 设置你的后端 API 地址
   timeout: 5000, // 请求超时时间
@@ -32,7 +35,7 @@ export const login = (username, password) =>
 
 
 
-// 假设在 api.js 或其他统一管理接口的文件
+// 获取设备列表
 export const getDevices = (page, limit) =>
     apiClient.get('/device/getDevices', {
         params: {
@@ -40,4 +43,8 @@ export const getDevices = (page, limit) =>
             limit
         }
     });
+// 修改设备信息
+export const changeInfo=(list)=> {
+    return apiClient.post('/device/changeInfo', list);
+}
 
