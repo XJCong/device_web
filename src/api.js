@@ -1,5 +1,6 @@
 // src/api.js
 import axios from 'axios';
+import * as http from "node:http";
 
 
 
@@ -48,3 +49,40 @@ export const changeInfo=(list)=> {
     return apiClient.post('/device/changeInfo', list);
 }
 
+/** 获取设备照片列表（含缩略图） */
+export const getPhotos = (zcbh) => apiClient.get(`/devices/${zcbh}/photos`);
+
+/** 上传单张照片（FormData） */
+export const uploadPhoto = (zcbh, file) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return apiClient.post(`/devices/${zcbh}/photos`, fd, {
+        headers: {
+            'Content-Type': 'multipart/form-data'
+        }
+    });
+};
+
+/** 删除照片 */
+export const deletePhoto = (zcbh, id) => apiClient.delete(`/devices/${zcbh}/photos/${id}`)
+
+/**  获取权限*/
+export const getPermissions = (role) =>
+    apiClient.get('/api/getPermissions', {
+        params: { role } // 关键：用 params 传参
+    })
+
+/** 获取所有角色列表 */
+export const getRoles = () => apiClient.get('/api/roles')
+
+/** 保存角色字段权限 */
+export const savePermission = (role, permissions) =>
+    apiClient.post('/api/savePermissions', { role, permissions })
+
+/** 保存单条设备修改 */
+export const changeInfoSingle = (list) =>
+    apiClient.post('/device/changeInfo', list)
+
+/** 根据设备编号获取设备信息 */
+export const getDeviceById = (zcbh) =>
+    apiClient.get(`/device/${zcbh}`);

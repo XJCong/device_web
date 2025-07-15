@@ -4,7 +4,7 @@
       <h3>导航菜单</h3>
       <ul>
         <li><router-link to="/Sidebar/home">首页</router-link></li>
-        <li><router-link to="/Sidebar/device">设备管理</router-link></li>
+        <li><router-link to="/Sidebar/device">权限管理</router-link></li>
         <li><router-link to="/Sidebar/settings">设置</router-link></li>
       </ul>
     </div>
@@ -61,6 +61,7 @@
 }
 
 .content {
+  width: 100%;
   margin-left: 240px;
   padding: 10px;
   background-color: #ffffff;

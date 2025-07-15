@@ -37,6 +37,13 @@ const routes = [
         path: 'settings',
         name: 'Settings',
         component: () => import('./components/Settings.vue'),
+      },
+      // router/index.js
+      {
+        path: '/device-edit/:zcbh',
+        name: 'DeviceEdit',
+        component: () => import('./components/DeviceEdit.vue'),
+        props: true
       }
     ]
   }

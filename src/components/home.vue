@@ -1,11 +1,21 @@
 <script setup>
-import { ref, computed, nextTick,onMounted } from 'vue'
-import { getDevices,changeInfo } from '@/api'
+import {ref, computed, nextTick, onMounted, onBeforeUnmount} from 'vue'
+import QRCode from 'qrcode';
+import { getDevices,changeInfo,getPhotos,uploadPhoto, deletePhoto,getPermissions } from '@/api'
+import { useRouter } from 'vue-router'
+import {Picture} from "@element-plus/icons-vue";
+const router = useRouter()
+import { ElMessage, ElDropdown, ElDropdownMenu, ElDropdownItem, ElBadge, ElIcon } from 'element-plus'
+
 
 /* -------- 原始数据 -------- */
 const devices       = ref([])
 const currentPage   = ref(0)
 const totalPages    = ref(1)
+/* -------- 照片弹窗 -------- */
+const showPhotoModal = ref(false)   // 弹窗开关
+const photoModalZcbh = ref('')      // 当前弹窗所属设备编号
+const photoModalList = ref([])      // 当前弹窗内的照片数组
 
 /* -------- 修改记录 -------- */
 const originalRows = ref([])        // 修改前的行快照
@@ -24,7 +34,7 @@ const fieldMapping = {
   zcmc: '设备名称',
   ppxh: '品牌型号',
   gg: '规格',
-  je: '金额',
+  je: '金额(/rmb)',
   jldw: '计量单位',
   cj: '厂家',
   ggrq: '购置日期',
@@ -48,6 +58,10 @@ const fieldMapping = {
   srr: '输入人',
   srrq: '输入日期'
 }
+/* -------- 权限映射 -------- */
+const permissionMapping = ({
+
+})
 
 /* -------- 表格渲染字段 -------- */
 const visibleFields = computed(() => {
@@ -56,6 +70,22 @@ const visibleFields = computed(() => {
       devices.value.some(d => d[key] != null && String(d[key]).trim() !== '')
   )
 })
+
+/* -------- 实物照片 -------- */
+const photoMap = ref({}) // { zcbh: [{id, thumbUrl, url}, ...] }
+
+/* 获取某设备的照片列表（含缩略图） */
+const fetchPhotos = async (zcbh) => {
+  try {
+    const { data } = await getPhotos(zcbh)
+    photoMap.value[zcbh] = data || []
+    console.log(`获取设备 ${zcbh} 照片列表成功`)
+    console.log(photoMap.value[zcbh])
+  } catch {
+    photoMap.value[zcbh] = []
+    console.error(`获取设备 ${zcbh} 照片列表失败`)
+  }
+}
 
 /* -------- 获取数据 -------- */
 const fetchDevices = async () => {
@@ -67,6 +97,9 @@ const fetchDevices = async () => {
     // 保存原始快照并清空 dirty 标志
     originalRows.value = devices.value.map(r => ({ ...r }))
     dirtyFlags.value   = Array(devices.value.length).fill(false)
+
+    /* 关键：给本页所有设备拉取照片 */
+    devices.value.forEach(r => fetchPhotos(r.zcbh))
   } catch (e) {
     console.error(e)
   }
@@ -80,13 +113,23 @@ const prevPage = () => { if (currentPage.value > 0) { currentPage.value--; fetch
 const editing = ref({})
 
 const updateValue = (index, key, val) => {
+  // 实时更新值，不做空值检查
   devices.value[index][key] = val
-  dirtyFlags.value[index] = JSON.stringify(devices.value[index]) !== JSON.stringify(originalRows.value[index]);
+  dirtyFlags.value[index] = JSON.stringify(devices.value[index]) !== JSON.stringify(originalRows.value[index])
 }
 
+
+
 const saveEdit = (index, key) => {
+  // 检查是否为limit权限且值为空
+  if (permissionMapping.value[key] === 'limit' && String(devices.value[index][key]).trim() === '') {
+    ElMessage.warning(`"${fieldMapping[key] || key}" 字段不能为空`)
+    // 恢复原值
+    devices.value[index][key] = originalRows.value[index][key]
+  }
   editing.value[index] = null
 }
+
 
 /* -------- 勾选框手动切换（取消勾选即放弃该行） -------- */
 const toggleDirty = (index) => {
@@ -131,16 +174,38 @@ const handleSubmit = () => {
 }
 const confirmSubmit = async () => {
   try {
+    // 检查limit权限字段是否为空
+    const emptyLimitFields = []
+    devices.value.forEach((row, idx) => {
+      if (!dirtyFlags.value[idx]) return
+
+      Object.keys(row).forEach(k => {
+        if (
+          permissionMapping.value[k] === 'limit' &&
+          row[k] !== originalRows.value[idx][k] &&
+          String(row[k]).trim() === ''
+        ) {
+          emptyLimitFields.push(fieldMapping[k] || k)
+        }
+      })
+    })
+
+    if (emptyLimitFields.length > 0) {
+      ElMessage.error(`以下限制修改字段不能为空: ${emptyLimitFields.join(', ')}`)
+      return
+    }
+
     console.log(collectChanges())
     await changeInfo(collectChanges())
-    alert('修改成功')
+    ElMessage.success('修改成功')
     await fetchDevices()
   } catch (e) {
-    alert('修改失败：' + (e.response?.data || e.message))
+    ElMessage.error('修改失败：' + (e.response?.data?.message || e.message))
   } finally {
     showSubmitModal.value = false
   }
 }
+
 
 const handleDiscard = () => {
   showDiscardModal.value = true
@@ -155,9 +220,139 @@ const confirmDiscard = () => {
   })
   showDiscardModal.value = false
 }
+
+/* -------- 实物照片上传/预览 -------- */
+/* 上传并刷新列表 */
+/* 查看大图 */
+const viewImage = (url) => window.open(url, '_blank')
+
+
+/* -------- 照片弹窗逻辑 -------- */
+const openPhotoModal = async (zcbh) => {
+  photoModalZcbh.value = zcbh
+  showPhotoModal.value = true
+  await fetchPhotos(zcbh)// 重新拉取最新列表
+  photoModalList.value = photoMap.value[zcbh] || []
+}
+
+const closePhotoModal = () => {
+  showPhotoModal.value = false
+  photoModalList.value = []
+}
+
+/* 电脑/手机上传触发 */
+const triggerComputerUpload = () => {
+  const el = document.querySelector('.photo-modal input[type=file]')
+  el?.click()
+}
+/*const mobileUpload = () => {
+  const el = document.querySelector('.photo-modal input[type=file]')
+  if (!el) return
+  el.setAttribute('capture', 'environment')
+  el.click()
+  el.removeAttribute('capture')
+}*/
+
+/* 上传文件后刷新 */
+const uploadPhotoFiles = async (e) => {
+  const files = Array.from(e.target.files || [])
+  if (!files.length) return
+  try {
+    await Promise.all(files.map(f => uploadPhoto(photoModalZcbh.value, f)))
+    await fetchPhotos(photoModalZcbh.value)
+    photoModalList.value = photoMap.value[photoModalZcbh.value] || []
+  } catch (err) {
+    alert('上传失败：' + (err.response?.data || err.message))
+  } finally {
+    e.target.value = ''
+  }
+}
+
+/* 删除单张后刷新 */
+const deletePhotoItem = async (id) => {
+  if (!confirm('确定删除这张照片？')) return
+  try {
+    await deletePhoto(photoModalZcbh.value, id)
+    await fetchPhotos(photoModalZcbh.value)
+    photoModalList.value = photoMap.value[photoModalZcbh.value] || []
+  } catch (err) {
+    alert('删除失败：' + (err.response?.data || err.message))
+  }
+}
+/* -------- 二维码弹窗 -------- */
+const showQRModal = ref(false)
+const qrCodeUrl = ref('')
+
+/* 生成上传二维码 */
+// 修改二维码生成方法
+const generateQRCode = async () => {
+  try {
+    // 生成一次性token
+
+
+    // 构建带token的上传URL
+    const uploadUrl = `${location.origin}/api/upload/${photoModalZcbh.value}`;
+
+    return await QRCode.toDataURL(uploadUrl, {
+      width: 200,
+      margin: 2,
+      color: { dark: '#000000', light: '#ffffff' }
+    });
+  } catch (err) {
+    console.error('二维码生成失败:', err);
+    return '';
+  }
+}
+
+
+/* 手机上传触发 */
+
+const mobileUpload = async () => {
+  qrCodeUrl.value = await generateQRCode()
+  if (!qrCodeUrl.value) {
+    alert('二维码生成失败，请稍后重试')
+    return
+  }
+  showQRModal.value = true
+}
+const handleQRError = () => {
+  console.error('二维码生成失败，URL:', qrCodeUrl.value)
+  alert('二维码生成失败，请检查网络连接')
+}
+
+// 在显示二维码后启动轮询
+const pollInterval = setInterval(async () => {
+  const { data } = await getPhotos(photoModalZcbh.value);
+  if(data.length > photoModalList.value.length) {
+    photoModalList.value = data;
+    clearInterval(pollInterval);
+  }
+}, 3000);
+
+// 二维码关闭时清除
+onBeforeUnmount(() => clearInterval(pollInterval));
+
+function editRow(row) {
+  router.push({ name: 'DeviceEdit', params: { zcbh: row.zcbh }, state: { row } })
+}
+function viewDetail(row) {
+  router.push({ name: 'DeviceDetail', params: { zcbh: row.zcbh }, state: { row } })
+}
+
 // 初始化时拉取数据
-onMounted(() => {
-  fetchDevices()
+onMounted(async () => {
+  // 假设角色信息存储在本地存储中
+  const role = localStorage.getItem('user_role') || 'user'
+  try {
+    const { data } = await getPermissions(role)
+    permissionMapping.value = data || {}
+    console.log('权限映射:')
+    console.log(data)
+  } catch (error) {
+    console.error('获取权限失败:', error)
+    permissionMapping.value = {} // 如果获取失败，设置为空对象
+  }
+  await fetchDevices()
 })
 </script>
 
@@ -174,11 +369,13 @@ onMounted(() => {
       <tr>
         <th width="30"><input type="checkbox" disabled /></th>
         <th>序号</th>
-        <th v-for="k in visibleFields" :key="k">{{ fieldMapping[k] || k }}</th>
+        <th>操作</th>
+        <th>实物照片</th>
+        <th v-for="k in visibleFields" :key="k" >{{ fieldMapping[k] || k }}</th>
       </tr>
       </thead>
       <tbody>
-      <tr v-for="(row, idx) in devices" :key="row.id">
+      <tr v-for="(row, idx) in devices" :key="row.id" >
         <td>
           <input
               type="checkbox"
@@ -187,27 +384,77 @@ onMounted(() => {
           />
         </td>
         <td>{{ idx + 1 }}</td>
-        <td v-for="k in visibleFields" :key="k">
-          <template v-if="k === 'lydwh' || k === 'zcbh'">
-            {{ row[k] }}
-          </template>
-          <template v-else>
-              <span
-                  v-if="!editing[idx] || editing[idx] !== k"
-                  @dblclick="editing[idx] = k"
-                  class="editable-cell"
-              >{{ row[k] }}</span>
+        <td>
+          <el-dropdown trigger="click">
+            <span class="el-dropdown-link">操作</span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item @click="editRow(row)">修改</el-dropdown-item>
+                <el-dropdown-item @click="viewDetail(row)">详情</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </td>
+
+        <!-- 实物照片列 -->
+        <!-- 实物照片列：只剩一个查看按钮 -->
+        <td>
+          <button @click="openPhotoModal(row.zcbh)">查看</button>
+          <el-badge
+            :value="photoMap[row.zcbh]?.length || 0"
+            :hidden="!photoMap[row.zcbh]?.length"
+            class="photo-icon-badge"
+          >
+            <el-icon class="photo-icon">
+              <Picture />
+            </el-icon>
+          </el-badge>
+        </td>
+
+
+
+        <!-- 其余字段列 -->
+        <!-- 其余字段列 -->
+              <td v-for="k in visibleFields" :key="k" :class="{ 'text-right': k === 'je' }">
+        <template v-if="permissionMapping.value[k] === 'read'">
+          <span class="read-only-cell">{{ row[k] }}</span>
+        </template>
+          <template v-else-if="permissionMapping.value[k] === 'limit'">
+            <span
+              v-if="!editing[idx] || editing[idx] !== k"
+              @dblclick="editing[idx] = k"
+              class="editable-cell limit"
+            >{{ row[k] }}</span>
             <input
-                v-else
-                type="text"
-                :value="row[k]"
-                @input="updateValue(idx, k, $event.target.value)"
-                @blur="saveEdit(idx, k)"
-                @keyup.enter="saveEdit(idx, k)"
-                class="editable-input"
+              v-else
+              type="text"
+              :value="row[k]"
+              @input="updateValue(idx, k, $event.target.value)"
+              @blur="saveEdit(idx, k)"
+              @keyup.enter="saveEdit(idx, k)"
+              class="editable-input"
+              :placeholder="`${fieldMapping[k] || k} (不能为空)`"
             />
           </template>
-        </td>
+        <template v-else>
+          <span
+              v-if="!editing[idx] || editing[idx] !== k"
+              @dblclick="editing[idx] = k"
+              class="editable-cell"
+          >{{ row[k] }}
+            </span>
+          <input
+              v-else
+              type="text"
+              :value="row[k]"
+              @input="updateValue(idx, k, $event.target.value)"
+              @blur="saveEdit(idx, k)"
+              @keyup.enter="saveEdit(idx, k)"
+              class="editable-input"
+          />
+        </template>
+      </td>
+
       </tr>
       </tbody>
     </table>
@@ -271,9 +518,81 @@ onMounted(() => {
       </div>
     </div>
   </div>
+
+  <!-- 照片查看/上传弹窗 -->
+  <div v-if="showPhotoModal" class="photo-modal-mask" @click.self="closePhotoModal">
+    <div class="photo-modal">
+      <h3>设备 {{ photoModalZcbh }} 的实物照片</h3>
+
+      <!-- 上传区 -->
+      <div class="upload-bar">
+        <input
+            type="file"
+            multiple
+            accept="image/*"
+            style="display:none"
+            ref="photoUploadInput"
+            @change="uploadPhotoFiles"
+        />
+        <button @click="triggerComputerUpload">电脑上传</button>
+        <button @click="mobileUpload">手机上传</button>
+      </div>
+
+      <!-- 缩略图网格 -->
+      <div class="photo-grid">
+        <div
+            v-for="p in photoModalList"
+            :key="p.id"
+            class="photo-item"
+        >
+          <img
+              :src="`http://localhost:8080${p.thumbUrl}`"
+              :alt="`设备 ${photoModalZcbh} 的实物照片`"
+              @click="viewImage(`http://localhost:8080${p.url}`)"
+          />
+          <span class="remove" @click="deletePhotoItem(p.id)">✕</span>
+        </div>
+        <div v-if="!photoModalList.length" class="empty">暂无照片</div>
+      </div>
+
+      <button class="close-btn" @click="closePhotoModal">关闭</button>
+    </div>
+  </div>
+  <div v-if="showQRModal" class="qr-modal-mask" @click.self="showQRModal = false">
+    <div class="qr-modal">
+      <h3>扫码上传照片</h3>
+      <img
+          :src="qrCodeUrl"
+          alt="手机上传二维码"
+          style="width: 200px; height: 200px"
+          @error="handleQRError"
+      />
+      <p>使用手机扫描二维码上传照片</p>
+      <button class="close-btn" @click="showQRModal = false">关闭</button>
+    </div>
+  </div>
 </template>
 
+
 <style scoped>
+.qr-modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+.qr-modal {
+  background: #fff;
+  padding: 20px;
+  border-radius:6px;
+  text-align: center;
+}
+.qr-modal p {
+  margin: 15px 0;
+}
 /* 原有样式保持不变，仅追加弹窗样式 */
 .modal-mask {
   position: fixed;
@@ -379,12 +698,110 @@ onMounted(() => {
   background-color: #f0f8ff;
   border: 1px solid #01050e;
   cursor: pointer;
+  color: #01050e;
 }
 
 .editable-input {
   background-color: #e9f3fd;
   border: 1px solid #007bff;
-  color: #495057;
+  color: #e61d1d;
   outline: none;
 }
+
+/* 照片弹窗蒙层 */
+.photo-modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+.photo-modal {
+  background: #fff;
+  padding: 20px;
+  border-radius: 6px;
+  width: 90%;
+  max-width: 600px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.upload-bar {
+  margin-bottom: 12px;
+}
+.upload-bar button {
+  margin-right: 8px;
+}
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 8px;
+}
+.photo-item {
+  position: relative;
+}
+.photo-item img {
+  width: 100%;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.photo-item .remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: #ff4d4f;
+  color: #fff;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+  cursor: pointer;
+}
+.empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: #999;
+  padding: 20px 0;
+}
+.close-btn {
+  margin-top: 12px;
+}
+
+.read-only-cell {
+  display: inline-block;
+  min-width: 100%;
+  background-color: #f4f4f4; /* 灰色背景 */
+  color: #01050e; /* 灰色字体 */
+  cursor: not-allowed; /* 禁止鼠标交互 */
+  border: 1px solid #ccc; /* 边框颜色 */
+  padding: 4px 8px;
+  font-size: 14px;
+}
+
+.text-right {
+  text-align: right;
+}
+.photo-icon-badge {
+  margin-left: 8px;
+}
+
+.photo-icon {
+  color: #409EFF;
+  font-size: 18px;
+  vertical-align: middle;
+}
+
+.el-badge__content.is-fixed {
+  top: 5px;
+  right: 5px;
+}
+.item.limit {
+  border-left: 4px solid #e6a23c; /* 橙色边框表示限制修改 */
+}
+
 </style>
