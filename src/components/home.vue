@@ -1,7 +1,7 @@
 <script setup>
 import {ref, computed, nextTick, onMounted, onBeforeUnmount} from 'vue'
 import QRCode from 'qrcode';
-import { getDevices,changeInfo,getPhotos,uploadPhoto, deletePhoto,getPermissions } from '@/api'
+import {getDevices, changeInfo, getPhotos, uploadPhoto, deletePhoto, getPermissions, getDeviceHistory} from '@/api'
 import { useRouter } from 'vue-router'
 import {Picture} from "@element-plus/icons-vue";
 const router = useRouter()
@@ -86,20 +86,38 @@ const fetchPhotos = async (zcbh) => {
     console.error(`获取设备 ${zcbh} 照片列表失败`)
   }
 }
+// 修改历史相关
+const showHistoryModal = ref(false)
+const historyList = ref([])
+
+const fetchHistory = async (zcbh) => {
+  try {
+    const { data } = await getDeviceHistory(zcbh)
+    historyList.value = data?.content || [] // 从 content 提取数据
+    console.log(`获取设备 ${zcbh} 修改历史成功`)
+    console.log(historyList.value)
+  } catch (error) {
+    console.error('获取修改历史失败:', error)
+    ElMessage.error('获取修改历史失败')
+  }
+}
+
 
 /* -------- 获取数据 -------- */
 const fetchDevices = async () => {
   try {
     const res = await getDevices(currentPage.value, 10)
     devices.value = res.data.data.content
-    totalPages.value = res.data.data.totalPages
+    totalPages.value = res.data.data.page.totalPages
 
     // 保存原始快照并清空 dirty 标志
     originalRows.value = devices.value.map(r => ({ ...r }))
     dirtyFlags.value   = Array(devices.value.length).fill(false)
 
     /* 关键：给本页所有设备拉取照片 */
-    devices.value.forEach(r => fetchPhotos(r.zcbh))
+    devices.value.forEach(r => {
+      if (r.zcbh) fetchPhotos(r.zcbh) // 仅当 zcbh 存在时才请求
+    })
   } catch (e) {
     console.error(e)
   }
@@ -160,6 +178,7 @@ const collectChanges = () => {
     // 使用 zcbh 替换 rowIndex
     list.push({
       rowIndex: idx+1,
+      user:localStorage.getItem('username'),
       zcbh: row.zcbh,// 设备编号作为唯一标识
       changes: changed
     })
@@ -322,12 +341,18 @@ const handleQRError = () => {
 
 // 在显示二维码后启动轮询
 const pollInterval = setInterval(async () => {
-  const { data } = await getPhotos(photoModalZcbh.value);
-  if(data.length > photoModalList.value.length) {
-    photoModalList.value = data;
-    clearInterval(pollInterval);
+  try {
+    const { data } = await getPhotos(photoModalZcbh.value);  // 确保解构data
+    if (data && data.length > photoModalList.value.length) {
+      photoModalList.value = data;
+      clearInterval(pollInterval);
+    }
+  } catch (error) {
+    console.error('轮询获取照片失败:', error);
+    clearInterval(pollInterval);  // 出错时也清除轮询
   }
 }, 3000);
+
 
 // 二维码关闭时清除
 onBeforeUnmount(() => clearInterval(pollInterval));
@@ -336,8 +361,30 @@ function editRow(row) {
   router.push({ name: 'DeviceEdit', params: { zcbh: row.zcbh }, state: { row } })
 }
 function viewDetail(row) {
+  // 显示详情页面或弹窗
   router.push({ name: 'DeviceDetail', params: { zcbh: row.zcbh }, state: { row } })
 }
+
+function viewHistory(row) {
+  photoModalZcbh.value = row.zcbh
+  showHistoryModal.value = true
+  fetchHistory(row.zcbh)
+}
+const parseChangeField = (bdyy) => {
+  if (!bdyy) return { field: '', old: '', new: '' }
+
+  // 示例格式："金额: 8400 -> 9000"
+  const match = bdyy.match(/([^:]+):\s*(.*?)\s*->\s*(.*)/)
+  if (match) {
+    return {
+      field: match[1],
+      old: match[2],
+      new: match[3]
+    }
+  }
+  return { field: '', old: '', new: '' }
+}
+
 
 // 初始化时拉取数据
 onMounted(async () => {
@@ -390,7 +437,8 @@ onMounted(async () => {
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item @click="editRow(row)">修改</el-dropdown-item>
-                <el-dropdown-item @click="viewDetail(row)">详情</el-dropdown-item>
+                <el-dropdown-item @click="viewHistory(row)">查看修改历史</el-dropdown-item>
+
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -463,7 +511,7 @@ onMounted(async () => {
   <!-- 分页 -->
   <div class="pagination">
     <button @click="prevPage" :disabled="currentPage === 0">上一页</button>
-    <span>第 {{ currentPage + 1 }} 页 / 共 {{ totalPages }} 页</span>
+    <span>第 {{ currentPage }} 页 / 共 {{ totalPages }} 页</span>
     <button @click="nextPage" :disabled="currentPage >= totalPages - 1">下一页</button>
   </div>
 
@@ -571,6 +619,38 @@ onMounted(async () => {
       <button class="close-btn" @click="showQRModal = false">关闭</button>
     </div>
   </div>
+  <!-- 修改历史弹窗 -->
+  <div v-if="showHistoryModal" class="modal-mask" @click.self="showHistoryModal = false">
+    <div class="modal">
+      <h3>设备 {{ photoModalZcbh }} 的修改历史</h3>
+
+      <table class="modal-table">
+        <thead>
+          <tr>
+            <th>变动时间</th>
+            <th>字段</th>
+            <th>旧值</th>
+            <th>新值</th>
+            <th>操作人</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(item, idx) in historyList" :key="idx">
+            <td>{{ item.bdrq }}</td>
+            <td>{{ parseChangeField(item.bdyy).field }}</td>
+            <td>{{ parseChangeField(item.bdyy).old }}</td>
+            <td>{{ parseChangeField(item.bdyy).new }}</td>
+            <td>{{ item.sqr }}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="modal-btns">
+        <button @click="showHistoryModal = false">关闭</button>
+      </div>
+    </div>
+  </div>
+
 </template>
 
 

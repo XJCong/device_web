@@ -21,6 +21,7 @@ const handleSubmit = async () => {
       const user_role=response.data.data.role;
       const message = response.data.message;
       // 存储 Token 到 localStorage
+      localStorage.setItem('username', form.value.username);
       localStorage.setItem('token', token);
       localStorage.setItem('user_role', user_role);
       setAuthToken(token);

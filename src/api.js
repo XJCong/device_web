@@ -50,7 +50,10 @@ export const changeInfo=(list)=> {
 }
 
 /** 获取设备照片列表（含缩略图） */
-export const getPhotos = (zcbh) => apiClient.get(`/devices/${zcbh}/photos`);
+  export const getPhotos = (zcbh) => {
+    if (!zcbh) throw new Error("设备编号不能为空");
+    return apiClient.get(`/devices/${zcbh}/photos`);
+  };
 
 /** 上传单张照片（FormData） */
 export const uploadPhoto = (zcbh, file) => {
@@ -86,3 +89,13 @@ export const changeInfoSingle = (list) =>
 /** 根据设备编号获取设备信息 */
 export const getDeviceById = (zcbh) =>
     apiClient.get(`/device/${zcbh}`);
+export const getDeviceHistory = (zcbh, page = 0, size = 10) => {
+    if (!zcbh || typeof zcbh !== 'string') {
+        return Promise.reject(new Error('设备编号不能为空'));
+    }
+    return apiClient.get(`/device/${encodeURIComponent(zcbh)}/history`, {
+        params: { page, size }
+    });
+};
+
+

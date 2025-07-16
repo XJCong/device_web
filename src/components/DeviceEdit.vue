@@ -90,6 +90,9 @@
 </template>
 
 <script setup>
+defineOptions({
+  inheritAttrs: false
+})
 import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox, ElIcon } from 'element-plus';
@@ -239,7 +242,7 @@ async function submit() {
     type: 'info',
     dangerouslyUseHTMLString: true,
   }).then(async () => {
-    await changeInfoSingle([{ zcbh: origin.value.zcbh, changes }]);
+    await changeInfoSingle([{ zcbh: origin.value.zcbh, changes, user:localStorage.getItem('username'), }]);
     ElMessage.success('已保存');
     router.back();
   }).catch(() => {
