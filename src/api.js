@@ -89,6 +89,7 @@ export const changeInfoSingle = (list) =>
 /** 根据设备编号获取设备信息 */
 export const getDeviceById = (zcbh) =>
     apiClient.get(`/device/${zcbh}`);
+/** 根据设备编号获取设备历史记录 */
 export const getDeviceHistory = (zcbh, page = 0, size = 10) => {
     if (!zcbh || typeof zcbh !== 'string') {
         return Promise.reject(new Error('设备编号不能为空'));
@@ -98,4 +99,31 @@ export const getDeviceHistory = (zcbh, page = 0, size = 10) => {
     });
 };
 
+export const getDepartments = () => apiClient.get('/device/dwb/list');
 
+export const FilteredDevices=()=> apiClient.get('/device/getFilteredDevices');
+
+// 获取单位树形数据
+export const getUnitTree = () =>
+    apiClient.get('/dwb/getUnitTree');
+
+// 获取人员列表
+export const getPersonList = (dwb) =>
+    apiClient.get('/ryb/list', { params: { dwbh: dwb } });
+
+// 获取存放地树形数据
+export const getLocationTree = () =>
+    apiClient.get('/cfddb/getLocationTree');
+
+// 获取设备分类列表
+export const getDeviceCategory = () =>
+    apiClient.get('/sbfl/list');
+
+export const searchUnits = async (query) => {
+    return axios.get(`/api/unit/search?q=${query}`);
+};
+
+// 如果 searchLocations 函数不存在，需要添加它
+export const searchLocations = async (query) => {
+    return axios.get(`/api/location/search?q=${query}`);
+};

@@ -1,7 +1,7 @@
 <script setup>
 import {ref, computed, nextTick, onMounted, onBeforeUnmount} from 'vue'
 import QRCode from 'qrcode';
-import {getDevices, changeInfo, getPhotos, uploadPhoto, deletePhoto, getPermissions, getDeviceHistory} from '@/api'
+import {getDevices, changeInfo, getPhotos, uploadPhoto, deletePhoto, getPermissions, getDeviceHistory,getDepartments,FilteredDevices} from '@/api'
 import { useRouter } from 'vue-router'
 import {Picture} from "@element-plus/icons-vue";
 const router = useRouter()
@@ -12,6 +12,8 @@ import { ElMessage, ElDropdown, ElDropdownMenu, ElDropdownItem, ElBadge, ElIcon 
 const devices       = ref([])
 const currentPage   = ref(0)
 const totalPages    = ref(1)
+const departments   = ref([]) // 新增：存储使用单位列表
+const filteredDevices=ref([]) // 新增：存储过滤后的设备列表
 /* -------- 照片弹窗 -------- */
 const showPhotoModal = ref(false)   // 弹窗开关
 const photoModalZcbh = ref('')      // 当前弹窗所属设备编号
@@ -19,7 +21,9 @@ const photoModalList = ref([])      // 当前弹窗内的照片数组
 
 /* -------- 修改记录 -------- */
 const originalRows = ref([])        // 修改前的行快照
-const dirtyFlags   = ref([])        // 每行是否被修改
+const dirtyFlags   = ref([])
+
+
 
 /* -------- 弹窗控制 -------- */
 const showSubmitModal   = ref(false)
@@ -74,6 +78,43 @@ const visibleFields = computed(() => {
 /* -------- 实物照片 -------- */
 const photoMap = ref({}) // { zcbh: [{id, thumbUrl, url}, ...] }
 
+/* 获取使用单位列表 */
+const fetchDepartments = async () => {
+  try {
+    const { data } = await getDepartments();
+    console.log('获取单位列表:', data);
+
+    departments.value = data || []; // 直接使用后端格式化好的数据
+
+    // 如果需要处理可能的空值
+    departments.value = (data || []).map(dept => ({
+      value: dept.value || '',
+      label: dept.label || '未知单位'
+    }));
+
+  } catch (e) {
+    console.error('获取单位列表失败:', e);
+    departments.value = [];
+  }
+}
+
+const fetchFilteredDevices= async (zcmc) => {
+  try{
+    const { data } = await FilteredDevices(zcmc);
+    filteredDevices.value = data || [];
+    console.log('获取过滤后的设备列表:', data);
+
+    // 如果需要处理可能的空值
+    filteredDevices.value = (data || []).map(dept => ({
+      value: dept.value || '',
+      label: dept.label || '未知单位'
+    }));
+    } catch (e) {
+    console.error('获取过滤后的设备列表失败:', e);
+    filteredDevices.value = [];
+  }
+}
+
 /* 获取某设备的照片列表（含缩略图） */
 const fetchPhotos = async (zcbh) => {
   try {
@@ -109,6 +150,8 @@ const fetchDevices = async () => {
     const res = await getDevices(currentPage.value, 10)
     devices.value = res.data.data.content
     totalPages.value = res.data.data.page.totalPages
+    console.log('获取设备列表成功')// console.log(devices.value)
+    console.log(devices.value)
 
     // 保存原始快照并清空 dirty 标志
     originalRows.value = devices.value.map(r => ({ ...r }))
@@ -131,10 +174,28 @@ const prevPage = () => { if (currentPage.value > 0) { currentPage.value--; fetch
 const editing = ref({})
 
 const updateValue = (index, key, val) => {
-  // 实时更新值，不做空值检查
-  devices.value[index][key] = val
-  dirtyFlags.value[index] = JSON.stringify(devices.value[index]) !== JSON.stringify(originalRows.value[index])
+  // 处理单位名称变化
+  if (key === 'lydwm') {
+    const selectedDept = departments.value.find(dept => dept.label === val);
+    if (selectedDept) {
+      devices.value[index].lydwh = selectedDept.value;
+    }
+  }
+
+  // 处理设备名称变化
+  if (key === 'zcmc') {
+    const selectedDevice = filteredDevices.value.find(dev => dev.label === val);
+    if (selectedDevice) {
+      // 自动设置分类号
+      devices.value[index].zcflh = selectedDevice.value;
+    }
+  }
+
+  // 通用更新逻辑
+  devices.value[index][key] = val;
+  dirtyFlags.value[index] = JSON.stringify(devices.value[index]) !== JSON.stringify(originalRows.value[index]);
 }
+
 
 
 
@@ -400,6 +461,8 @@ onMounted(async () => {
     permissionMapping.value = {} // 如果获取失败，设置为空对象
   }
   await fetchDevices()
+  await fetchDepartments() // 新增：获取使用单位列表
+  await fetchFilteredDevices()
 })
 </script>
 
@@ -464,46 +527,85 @@ onMounted(async () => {
         <!-- 其余字段列 -->
         <!-- 其余字段列 -->
               <td v-for="k in visibleFields" :key="k" :class="{ 'text-right': k === 'je' }">
-        <template v-if="permissionMapping.value[k] === 'read'">
-          <span class="read-only-cell">{{ row[k] }}</span>
-        </template>
-          <template v-else-if="permissionMapping.value[k] === 'limit'">
-            <span
-              v-if="!editing[idx] || editing[idx] !== k"
-              @dblclick="editing[idx] = k"
-              class="editable-cell limit"
-            >{{ row[k] }}</span>
-            <input
-              v-else
-              type="text"
-              :value="row[k]"
-              @input="updateValue(idx, k, $event.target.value)"
-              @blur="saveEdit(idx, k)"
-              @keyup.enter="saveEdit(idx, k)"
-              class="editable-input"
-              :placeholder="`${fieldMapping[k] || k} (不能为空)`"
-            />
-          </template>
-        <template v-else>
-          <span
-              v-if="!editing[idx] || editing[idx] !== k"
-              @dblclick="editing[idx] = k"
-              class="editable-cell"
-          >{{ row[k] }}
-            </span>
-          <input
-              v-else
-              type="text"
-              :value="row[k]"
-              @input="updateValue(idx, k, $event.target.value)"
-              @blur="saveEdit(idx, k)"
-              @keyup.enter="saveEdit(idx, k)"
-              class="editable-input"
-          />
-        </template>
-      </td>
 
-      </tr>
+                <!-- --- 只读单元格 -- -->
+                <template v-if="permissionMapping.value[k] === 'read'">
+                  <span class="read-only-cell">{{ row[k] }}</span>
+                </template>
+                <template v-else-if="permissionMapping.value[k] === 'limit'&& k !== 'lydwm'&& k !== 'zcmc'">
+                  <span
+                    v-if="!editing[idx] || editing[idx] !== k"
+                    @dblclick="editing[idx] = k"
+                    class="editable-cell limit"
+                  >{{ row[k] }}</span>
+                  <input
+                    v-else
+                    type="text"
+                    :value="row[k]"
+                    @input="updateValue(idx, k, $event.target.value)"
+                    @blur="saveEdit(idx, k)"
+                    @keyup.enter="saveEdit(idx, k)"
+                    class="editable-input"
+                    :placeholder="`${fieldMapping[k] || k} (不能为空)`"
+                  />
+                </template>
+                <!-- --- 限制使用单位 -- -->
+                <template v-else-if="k === 'lydwm'&&permissionMapping.value[k] === 'limit'" >
+                  <el-select
+                      v-model="row.lydwm"
+                  placeholder="请选择使用单位"
+                  @change="(val) => updateValue(idx, 'lydwm', val)"
+                  class="editable-select"
+                  filterable
+                  >
+                  <el-option
+                      v-for="dept in departments"
+                      :key="dept.value"
+                      :label="dept.label"
+                      :value="dept.label"
+                  />
+                  </el-select>
+                </template>
+
+                <!-- 设备名称选择 -->
+                <template v-else-if="k ==='zcmc' && permissionMapping.value[k] === 'limit'">
+                  <el-select
+                      v-model="row.zcmc"
+                      placeholder="请选择设备"
+                      @change="(val) => updateValue(idx, 'zcmc', val)"
+                      class="editable-select"
+                      filterable
+                  >
+                    <el-option
+                        v-for="dev in filteredDevices"
+                        :key="dev.value"
+                        :label="dev.label"
+                        :value="dev.label"
+                    />
+                  </el-select>
+                </template>
+
+          <!-- --- 可编辑单元格 -- -->
+                <template v-else>
+                  <span
+                      v-if="!editing[idx] || editing[idx] !== k"
+                      @dblclick="editing[idx] = k"
+                      class="editable-cell"
+                  >{{ row[k] }}
+                    </span>
+                  <input
+                      v-else
+                      type="text"
+                      :value="row[k]"
+                      @input="updateValue(idx, k, $event.target.value)"
+                      @blur="saveEdit(idx, k)"
+                      @keyup.enter="saveEdit(idx, k)"
+                      class="editable-input"
+                  />
+                </template>
+              </td>
+
+        </tr>
       </tbody>
     </table>
   </div>
@@ -813,6 +915,8 @@ onMounted(async () => {
 .upload-bar button {
   margin-right: 8px;
 }
+
+
 .photo-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
@@ -883,5 +987,31 @@ onMounted(async () => {
 .item.limit {
   border-left: 4px solid #e6a23c; /* 橙色边框表示限制修改 */
 }
+/* 修改选择框样式，允许文字选择 */
+.editable-select {
+  padding: 8px 12px;
+  border: 1px solid #0f131b;
+  border-radius: 4px;
+  font-size: 14px;
+  color: #000000;
+  transition: border-color 0.2s;
+  width: 200px;
+  min-width: 100%;
+  user-select: text;
+  -webkit-user-select: text;
+}
 
+/* 允许选择框输入文字和选项文字 */
+.editable-select :deep(.el-input__inner),
+.editable-select :deep(.el-select-dropdown__item) {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
+/* 下拉菜单样式调整 */
+.editable-select :deep(.el-select-dropdown) {
+  user-select: text;
+  -webkit-user-select: text;
+}
 </style>

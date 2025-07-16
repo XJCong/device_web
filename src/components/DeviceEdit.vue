@@ -6,7 +6,42 @@
       <div v-for="k in displayFields" :key="k" class="item-row">
         <div class="field-name">{{ fieldMap[k] || k }}</div>
         <div class="field-value">
-          <template v-if="permissionMap[k] === 'write' || permissionMap[k] === 'limit'">
+          <!-- 单位名称选择 -->
+          <template v-if="k === 'lydwm' && permissionMap[k] === 'limit'">
+            <el-select
+                v-model="form.lydwm"
+                placeholder="请选择使用单位"
+                @change="(val) => updateValue('lydwm', val)"
+                class="editable-select"
+                filterable
+                :teleported="false"
+            >
+              <el-option
+                  v-for="dept in departments"
+                  :key="dept.value"
+                  :label="dept.label"
+                  :value="dept.label"
+              />
+            </el-select>
+          </template>
+          <template v-else-if="k === 'zcmc' && permissionMap[k] === 'limit'">
+            <el-select
+                v-model="form.zcmc"
+                placeholder="请选择分类"
+                @change="(val) => updateValue('zcmc', val)"
+                class="editable-select"
+                filterable
+                :teleported="false"
+            >
+              <el-option
+                  v-for="dept in filteredDevices"
+                  :key="dept.value"
+                  :label="dept.label"
+                  :value="dept.label"
+              />
+            </el-select>
+          </template>
+          <template v-else-if="permissionMap[k] === 'write' || permissionMap[k] === 'limit'">
             <span
               v-if="!editing[k]"
               @dblclick="editing[k] = true"
@@ -25,7 +60,6 @@
               :placeholder="permissionMap[k] === 'limit' ? `${fieldMap[k] || k} (不能为空)` : ''"
             />
           </template>
-
           <span v-else class="readonly-box">
             {{ origin[k] }}
           </span>
@@ -96,7 +130,15 @@ defineOptions({
 import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox, ElIcon } from 'element-plus';
-import {changeInfoSingle, getPermissions, getDeviceById, uploadPhoto, getPhotos, deletePhoto} from '@/api';
+import {
+  changeInfoSingle,
+  getPermissions,
+  getDeviceById,
+  uploadPhoto,
+  getPhotos,
+  deletePhoto,
+  getDepartments, FilteredDevices
+} from '@/api';
 import { Picture } from "@element-plus/icons-vue";
 
 const route = useRoute();
@@ -114,6 +156,39 @@ const photoModalList = ref([]);      // 当前弹窗内的照片数组
 
 /* -------- 实物照片 -------- */
 const photoMap = ref({}) // { zcbh: [{id, thumbUrl, url}, ...] }
+
+const departments = ref([]) // 存储单位列表
+const filteredDevices=ref([])
+
+// 获取单位列表
+const fetchDepartments = async () => {
+  try {
+    const { data } = await getDepartments()
+    departments.value = (data || []).map(dept => ({
+      value: dept.value || dept.dwbh || '',  // 单位编号
+      label: dept.label || dept.dwmc || '未知单位' // 单位名称
+    }))
+  } catch (e) {
+    console.error('获取单位列表失败:', e)
+    departments.value = []
+  }
+}
+const fetchFilteredDevices= async (zcmc) => {
+  try{
+    const { data } = await FilteredDevices(zcmc);
+    filteredDevices.value = data || [];
+    console.log('获取过滤后的设备列表:', data);
+
+    // 如果需要处理可能的空值
+    filteredDevices.value = (data || []).map(dept => ({
+      value: dept.value || '',
+      label: dept.label || '未知单位'
+    }));
+  } catch (e) {
+    console.error('获取过滤后的设备列表失败:', e);
+    filteredDevices.value = [];
+  }
+}
 
 const fieldMap = {
   lydwh: '使用单位号',
@@ -149,8 +224,22 @@ const fieldMap = {
 };
 
 const updateValue = (key, val) => {
-  form.value[key] = val;
-};
+  // 处理单位名称变化
+  if (key === 'lydwm') {
+    const selectedDept = departments.value.find(dept => dept.label === val)
+    if (selectedDept) {
+      form.value.lydwh = selectedDept.value // 自动设置单位编号
+    }
+  }
+  if(key === 'zcmc'){
+    const selectedDevice = filteredDevices.value.find(device => device.label === val)
+    if (selectedDevice) {
+      form.value.zcflh = selectedDevice.value
+    }
+  }
+
+  form.value[key] = val
+}
 
 const saveEdit = (key) => {
   if (permissionMap.value[key] === 'limit' && String(form.value[key]).trim() === '') {
@@ -182,6 +271,8 @@ onMounted(async () => {
   // 初始化 photoModalList
   const { data: photos } = await getPhotos(code);
   photoModalList.value = photos;
+  await fetchDepartments() // 获取单位列表a
+  await fetchFilteredDevices()
 });
 
 /* 手机上传触发 */
